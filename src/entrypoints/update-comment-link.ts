@@ -119,33 +119,53 @@ async function run() {
       const containsPRUrl = currentBody.match(prUrlPattern);
 
       if (!containsPRUrl) {
-        // Check if there are changes to the branch compared to the default branch
+        // FIX: Check if the branch exists before trying to compare
+        // This prevents 404 errors when Claude didn't create any commits
+        let branchExists = false;
         try {
-          const { data: comparison } =
-            await octokit.rest.repos.compareCommitsWithBasehead({
-              owner,
-              repo,
-              basehead: `${baseBranch}...${claudeBranch}`,
-            });
-
-          // If there are changes (commits or file changes), add the PR URL
-          if (
-            comparison.total_commits > 0 ||
-            (comparison.files && comparison.files.length > 0)
-          ) {
-            const entityType = context.isPR ? "PR" : "Issue";
-            const prTitle = encodeURIComponent(
-              `${entityType} #${context.entityNumber}: Changes from Claude`,
-            );
-            const prBody = encodeURIComponent(
-              `This PR addresses ${entityType.toLowerCase()} #${context.entityNumber}\n\nGenerated with [Claude Code](https://claude.ai/code)`,
-            );
-            const prUrl = `${serverUrl}/${owner}/${repo}/compare/${baseBranch}...${claudeBranch}?quick_pull=1&title=${prTitle}&body=${prBody}`;
-            prLink = `\n[Create a PR](${prUrl})`;
+          await octokit.rest.repos.getBranch({
+            owner,
+            repo,
+            branch: claudeBranch,
+          });
+          branchExists = true;
+        } catch (error: any) {
+          if (error.status === 404) {
+            console.log(`Branch ${claudeBranch} does not exist, skipping PR link creation`);
+          } else {
+            console.error("Error checking branch existence:", error);
           }
-        } catch (error) {
-          console.error("Error checking for changes in branch:", error);
-          // Don't fail the entire update if we can't check for changes
+        }
+
+        // Only proceed with comparison if the branch exists
+        if (branchExists) {
+          try {
+            const { data: comparison } =
+              await octokit.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: `${baseBranch}...${claudeBranch}`,
+              });
+
+            // If there are changes (commits or file changes), add the PR URL
+            if (
+              comparison.total_commits > 0 ||
+              (comparison.files && comparison.files.length > 0)
+            ) {
+              const entityType = context.isPR ? "PR" : "Issue";
+              const prTitle = encodeURIComponent(
+                `${entityType} #${context.entityNumber}: Changes from Claude`,
+              );
+              const prBody = encodeURIComponent(
+                `This PR addresses ${entityType.toLowerCase()} #${context.entityNumber}\n\nGenerated with [Claude Code](https://claude.ai/code)`,
+              );
+              const prUrl = `${serverUrl}/${owner}/${repo}/compare/${baseBranch}...${claudeBranch}?quick_pull=1&title=${prTitle}&body=${prBody}`;
+              prLink = `\n[Create a PR](${prUrl})`;
+            }
+          } catch (error) {
+            console.error("Error checking for changes in branch:", error);
+            // Don't fail the entire update if we can't check for changes
+          }
         }
       }
     }
